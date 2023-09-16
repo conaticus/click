@@ -27,13 +27,8 @@ impl Installer {
             .to_string();
 
         let version_raw = match split.next() {
-            Some(version_raw) => {
-                if version_raw == "latest" {
-                    return Ok((name, None));
-                }
-
-                version_raw
-            }
+            Some(version_raw) if version_raw == "latest" => return Ok((name, None)),
+            Some(version_raw) => version_raw,
             None => return Ok((name, None)),
         };
 
