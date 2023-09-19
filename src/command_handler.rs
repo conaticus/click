@@ -28,7 +28,7 @@ pub async fn handle_args(mut args: Args) -> Result<(), ParseError> {
     };
 
     let mut command_handler: Box<dyn CommandHandler> = match command.to_lowercase().as_str() {
-        "install" => Box::new(Installer::default()),
+        "install" => Box::<Installer>::default(),
         _ => return Err(CommandNotFound(command.to_string())),
     };
 

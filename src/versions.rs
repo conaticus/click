@@ -20,7 +20,7 @@ type PackageDetails = (String, Option<Comparator>);
 pub struct Versions;
 impl Versions {
     pub fn parse_package_details(details: String) -> Result<PackageDetails, ParseError> {
-        let mut split = details.split("@");
+        let mut split = details.split('@');
 
         let name = split
             .next()
@@ -33,8 +33,7 @@ impl Versions {
             None => return Ok((name, None)),
         };
 
-        let version = VersionReq::parse(version_raw)
-            .or_else(|err| Err(ParseError::InvalidVersionNotation(err)))?;
+        let version = VersionReq::parse(version_raw).map_err(ParseError::InvalidVersionNotation)?;
 
         let comparator = version
             .comparators
@@ -103,7 +102,7 @@ impl Versions {
             }
         }
 
-        let mut versions = available_versions.iter().collect::<Vec<_>>();
+        let versions = available_versions.iter().collect::<Vec<_>>();
 
         // Do in reverse order so we find the latest compatible version.
         for (version_str, _) in versions.iter().rev() {
@@ -118,7 +117,7 @@ impl Versions {
     }
 
     // NOTE(conaticus): This might not be effective for versions that include a prerelease in the version (experimental, canary etc)
-    fn sort(versions_vec: &mut Vec<(&String, &VersionData)>) {
+    fn sort(versions_vec: &mut [(&String, &VersionData)]) {
         versions_vec.sort_by(|a, b| a.0.cmp(b.0))
     }
 

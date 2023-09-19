@@ -5,11 +5,11 @@ use std::{env::Args, time::Instant};
 use crate::{
     command_handler::CommandHandler,
     errors::{
-        CommandError::{self, *},
+        CommandError::{self},
         ParseError::{self, *},
     },
     http::HTTPRequest,
-    types::{PackageData, VersionData},
+    types::VersionData,
     versions::Versions,
 };
 

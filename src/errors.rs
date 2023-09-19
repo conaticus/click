@@ -20,6 +20,4 @@ pub enum CommandError {
     FailedResponseText(reqwest::Error),
     #[error("the package version you provided was invalid or does not exist")]
     InvalidVersion,
-    #[error("the package provided does not have any versions available (wtf)")]
-    NoVersionsAvailable,
 }

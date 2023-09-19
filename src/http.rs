@@ -18,10 +18,10 @@ impl HTTPRequest {
             )
             .send()
             .await
-            .or_else(|err| Err(HTTPFailed(err)))?
+            .map_err(HTTPFailed)?
             .text()
             .await
-            .or_else(|err| Err(FailedResponseText(err)))
+            .map_err(FailedResponseText)
     }
 
     /// This makes a request for a specific version of a package.
@@ -32,7 +32,7 @@ impl HTTPRequest {
         version: &String,
     ) -> Result<VersionData, CommandError> {
         let response_raw = Self::registry(client, format!("/{package_name}/{version}")).await?;
-        serde_json::from_str::<VersionData>(&response_raw).or_else(|err| Err(ParsingFailed(err)))
+        serde_json::from_str::<VersionData>(&response_raw).map_err(ParsingFailed)
     }
 
     /// This makes a request for all data for a package including all its versions.
@@ -42,6 +42,6 @@ impl HTTPRequest {
         package_name: &String,
     ) -> Result<PackageData, CommandError> {
         let response_raw = Self::registry(client, format!("/{package_name}")).await?;
-        serde_json::from_str::<PackageData>(&response_raw).or_else(|err| Err(ParsingFailed(err)))
+        serde_json::from_str::<PackageData>(&response_raw).map_err(ParsingFailed)
     }
 }
