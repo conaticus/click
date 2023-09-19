@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 use crate::{
     errors::CommandError::{self, *},
     types::{PackageData, VersionData},
@@ -7,6 +9,18 @@ pub const REGISTRY_URL: &str = "https://registry.npmjs.org";
 
 pub struct HTTPRequest;
 impl HTTPRequest {
+    /// Download a file from any specified URL.
+    pub async fn get_bytes(client: reqwest::Client, url: String) -> Result<Bytes, CommandError> {
+        client
+            .get(url)
+            .send()
+            .await
+            .map_err(CommandError::HTTPFailed)?
+            .bytes()
+            .await
+            .map_err(CommandError::FailedResponseBytes)
+    }
+
     /// Make a request to the NPM registry.
     /// This includes the recommended header to shorten the response size.
     async fn registry(client: reqwest::Client, route: String) -> Result<String, CommandError> {
