@@ -8,14 +8,18 @@ pub enum ParseError {
     MissingArgument(String),
     #[error("invalid version notation ({0})")]
     InvalidVersionNotation(semver::Error),
-    #[error("could not convert version to string ({0})")]
-    InvalidVersionString(semver::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum CommandError {
     #[error("failed to execute http request ({0})")]
     HTTPFailed(reqwest::Error),
-    #[error("Failed to parse http data to struct via json")]
+    #[error("failed to parse http data to struct via json ({0})")]
     ParsingFailed(serde_json::Error),
+    #[error("failed to get http response text ({0})")]
+    FailedResponseText(reqwest::Error),
+    #[error("the package version you provided was invalid or does not exist")]
+    InvalidVersion,
+    #[error("the package provided does not have any versions available (wtf)")]
+    NoVersionsAvailable,
 }

@@ -19,7 +19,7 @@ pub async fn handle_args(mut args: Args) -> Result<(), ParseError> {
     args.next(); // Remove initial binary argument
 
     let command = match args.next() {
-        Some(c) => c,
+        Some(command) => command,
         None => {
             // TODO(conaticus): Implement help menu
             println!("No help menu implemented yet.");
