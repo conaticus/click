@@ -3,7 +3,15 @@ use bytes::Bytes;
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use semver::{Comparator, VersionReq};
-use std::{collections::HashMap, env::Args, sync::atomic::AtomicUsize, time::Instant};
+use std::{
+    collections::HashMap,
+    env::Args,
+    sync::{
+        atomic::{self, AtomicUsize},
+        mpsc::{channel, Sender},
+    },
+    time::Instant,
+};
 use tar::Archive;
 
 use crate::{
@@ -24,6 +32,20 @@ pub struct Installer {
 }
 
 static ACTIVE_TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+fn increment_task_count() {
+    ACTIVE_TASK_COUNT.fetch_add(1, atomic::Ordering::SeqCst);
+}
+
+fn decrement_task_count() {
+    ACTIVE_TASK_COUNT.fetch_sub(1, atomic::Ordering::SeqCst);
+}
+
+fn load_task_count() -> usize {
+    ACTIVE_TASK_COUNT.load(atomic::Ordering::SeqCst)
+}
+
+type PackageBytes = (String, Bytes); // Package destination, package bytes
 
 impl Installer {
     async fn get_version_data(
@@ -48,6 +70,7 @@ impl Installer {
     fn install_package(
         client: reqwest::Client,
         version_data: VersionData,
+        bytes_sender: Sender<PackageBytes>,
     ) -> Result<(), CommandError> {
         let cache_dir = dirs::cache_dir().expect("Could not find cache directory");
         let package_dest = format!(
@@ -61,12 +84,15 @@ impl Installer {
 
         let tarball_url = version_data.dist.tarball.clone();
 
-        ACTIVE_TASK_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         tokio::spawn(async move {
+            increment_task_count();
+
             let bytes = HTTPRequest::get_bytes(client.clone(), tarball_url)
                 .await
                 .unwrap();
-            Self::extract_tarball(bytes, package_dest).unwrap();
+
+            // TODO(conaticus): Do this outside of tokio tasks as it's blocking the threads from working at full potential
+            bytes_sender.send((package_dest, bytes)).unwrap();
 
             let dependencies = version_data.dependencies.unwrap_or(HashMap::new());
 
@@ -79,17 +105,17 @@ impl Installer {
                 let version_data = Self::get_version_data(client.clone(), &name, Some(comparator))
                     .await
                     .unwrap();
-                Self::install_package(client.clone(), version_data).unwrap();
+
+                Self::install_package(client.clone(), version_data, bytes_sender.clone()).unwrap();
             }
 
-            ACTIVE_TASK_COUNT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            decrement_task_count();
         });
 
         Ok(())
     }
 
     // NOTE(conaticus): Later this will likely need to be moved so it can be reused
-    /// To be used outside of the tokio HTTP tasks as it would block them
     fn extract_tarball(bytes: Bytes, dest: String) -> Result<(), CommandError> {
         let bytes = &bytes.to_vec()[..];
         let gz = GzDecoder::new(bytes);
@@ -131,8 +157,22 @@ impl CommandHandler for Installer {
         )
         .await?;
 
-        Self::install_package(client, version_data)?;
-        while ACTIVE_TASK_COUNT.load(std::sync::atomic::Ordering::SeqCst) != 0 {}
+        let (tx, rx) = channel::<PackageBytes>();
+
+        tokio::task::spawn_blocking(move || {
+            increment_task_count();
+
+            while let Ok((package_dest, bytes)) = rx.recv() {
+                Installer::extract_tarball(bytes, package_dest).unwrap();
+            }
+
+            decrement_task_count();
+        });
+
+        Self::install_package(client, version_data, tx)?;
+
+        // NOTE(conaticus): This is blocking however it's not going to have a huge performance impact on tokio
+        while load_task_count() != 0 {}
 
         println!("elapsed: {}ms", start.elapsed().as_millis());
 
