@@ -19,6 +19,12 @@ type PackageDetails = (String, Option<Comparator>);
 
 pub struct Versions;
 impl Versions {
+    pub fn parse_semantic_version(raw_version: &String) -> Result<Comparator, ParseError> {
+        let mut version =
+            VersionReq::parse(raw_version).map_err(ParseError::InvalidVersionNotation)?;
+        Ok(version.comparators.remove(0))
+    }
+
     pub fn parse_package_details(details: String) -> Result<PackageDetails, ParseError> {
         let mut split = details.split('@');
 
@@ -33,14 +39,7 @@ impl Versions {
             None => return Ok((name, None)),
         };
 
-        let version = VersionReq::parse(version_raw).map_err(ParseError::InvalidVersionNotation)?;
-
-        let comparator = version
-            .comparators
-            .get(0)
-            .expect("Missing version comparator")
-            .clone(); // Annoyingly we have to clone because we can't move out of the array
-
+        let comparator = Self::parse_semantic_version(&version_raw.to_string())?;
         Ok((name, Some(comparator)))
     }
 
