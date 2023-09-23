@@ -101,8 +101,6 @@ impl Versions {
             }
         }
 
-        let versions = available_versions.iter().collect::<Vec<_>>();
-
         // Do in reverse order so we find the latest compatible version.
         for (version_str, _) in versions.iter().rev() {
             let version = Version::from_str(version_str.as_str()).unwrap_or(EMPTY_VERSION);
