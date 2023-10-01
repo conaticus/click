@@ -102,6 +102,7 @@ dependencies = [
  "bytes",
  "dirs",
  "flate2",
+ "lazy_static",
  "reqwest",
  "semver",
  "serde",

@@ -25,7 +25,10 @@ pub enum CommandError {
     InvalidVersion,
     #[error("failed to extract tar file ({0})")]
     ExtractionFailed(Error),
-    // NOTE(conaticus): I don't like repeating this in the command errors, might find a better work around later
-    #[error("invalid version notation ({0})")]
-    InvalidVersionNotation(semver::Error),
+    #[error("could not find version in lock hashmap")]
+    DependencyNotFoundInHashMap,
+    #[error("could not find cache directory ({0})")]
+    NoCacheDirectory(Error),
+    #[error("failed to get directory entry ({0})")]
+    FailedDirectoryEntry(Error),
 }

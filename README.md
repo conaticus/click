@@ -31,3 +31,4 @@ These are the primary functioning features required for this to pass as a "NodeJ
 - Creation and maintainence of a `node_modules` folder in the working directory that contains [symlinks](https://en.wikipedia.org/wiki/Symbolic_link) to the cached packages
 - An `uninstall` command
 - An `update` command
+- Proper error handling everywhere

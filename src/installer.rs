@@ -14,8 +14,10 @@ use std::{
     time::Instant,
 };
 use tar::Archive;
+use tokio::fs;
 
 use crate::{
+    cache::{Cache, CACHE_DIRECTORY},
     command_handler::CommandHandler,
     errors::{
         CommandError::{self},
@@ -47,15 +49,18 @@ fn load_task_count() -> usize {
 }
 
 type PackageBytes = (String, Bytes); // Package destination, package bytes
-type InstalledVersionsMutex = Arc<Mutex<HashMap<String, String>>>;
+
+type InstalledVersionsMutex = Arc<Mutex<HashMap<String, Vec<String>>>>;
 
 impl Installer {
+    /// Gets the version data taking in the full version rather than resolving it on its own.
     async fn get_version_data(
         client: Client,
         package_name: &String,
+        full_version: Option<String>,
         semantic_version: Option<&Comparator>,
     ) -> Result<VersionData, CommandError> {
-        if let Some(version) = Versions::resolve_full_version(semantic_version) {
+        if let Some(version) = full_version {
             return HTTPRequest::version_data(client.clone(), package_name, &version).await;
         }
 
@@ -79,15 +84,33 @@ impl Installer {
         installed_dependencies_mux: InstalledVersionsMutex,
     ) -> bool {
         let mut installed_dependencies = installed_dependencies_mux.lock().unwrap();
-        let installed_version = installed_dependencies.get(name);
+        let stringified_version = Versions::stringify(name, version);
+
+        let installed_version = installed_dependencies.get(&stringified_version);
 
         match installed_version {
-            Some(installed_version) => version == installed_version,
+            Some(_) => true,
             None => {
-                installed_dependencies.insert(name.to_string(), version.to_string());
+                installed_dependencies.insert(stringified_version, Vec::new());
                 false
             }
         }
+    }
+
+    /// Append a version to a specific parent version, this hashmap will be used to generate package lock files.
+    fn append_version(
+        parent_version_name: String,
+        new_version_name: String,
+        installed_dependencies_mux: InstalledVersionsMutex,
+    ) -> Result<(), CommandError> {
+        let mut installed_dependencies = installed_dependencies_mux.lock().unwrap();
+        let parent_version = installed_dependencies
+            .entry(parent_version_name)
+            .or_insert(Vec::new());
+
+        parent_version.push(new_version_name);
+
+        Ok(())
     }
 
     fn install_package(
@@ -104,20 +127,18 @@ impl Installer {
             return Ok(());
         }
 
-        let cache_dir = dirs::cache_dir().expect("Could not find cache directory");
         let package_dest = format!(
-            "{}/node-cache/{}@{}",
-            cache_dir
-                .to_str()
-                .expect("Couldn't convert PathBuf to &str"),
-            version_data.name,
-            version_data.version
+            "{}/{}",
+            *CACHE_DIRECTORY,
+            Versions::stringify(&version_data.name, &version_data.version)
         );
 
         let tarball_url = version_data.dist.tarball.clone();
 
         tokio::spawn(async move {
             increment_task_count();
+
+            let stringified_parent = Versions::stringify(&version_data.name, &version_data.version);
 
             let bytes = HTTPRequest::get_bytes(client.clone(), tarball_url)
                 .await
@@ -132,9 +153,32 @@ impl Installer {
                 let comparator = Versions::parse_semantic_version(&version)
                     .expect("Failed to parse semantic version"); // TODO(conaticus): Change this to return a result
 
-                let version_data = Self::get_version_data(client.clone(), &name, Some(&comparator))
+                let comparator_ref = Some(&comparator);
+
+                let full_version = Versions::resolve_full_version(comparator_ref);
+                let is_cached = Cache::exists(&name, full_version.as_ref(), comparator_ref)
                     .await
                     .unwrap();
+
+                if is_cached {
+                    // TODO(conaticus): Handle if in the cache.
+                    continue;
+                }
+
+                let version_data =
+                    Self::get_version_data(client.clone(), &name, full_version, comparator_ref)
+                        .await
+                        .unwrap();
+
+                // TODO(conaticus): Instead of re-formatting the parent version, this should be only done once
+                let stringified_child = Versions::stringify(&name, &version);
+
+                Self::append_version(
+                    stringified_parent.clone(),
+                    stringified_child,
+                    Arc::clone(&installed_dependencies_mux),
+                )
+                .unwrap();
 
                 Self::install_package(
                     client.clone(),
@@ -171,7 +215,8 @@ impl CommandHandler for Installer {
             .next()
             .ok_or(MissingArgument(String::from("package name")))?;
 
-        let (package_name, semantic_version) = Versions::parse_package_details(package_details)?;
+        let (package_name, semantic_version) =
+            Versions::parse_semantic_package_details(package_details)?;
         self.package_name = package_name;
         self.semantic_version = semantic_version;
 
@@ -179,16 +224,31 @@ impl CommandHandler for Installer {
     }
 
     async fn execute(&self) -> Result<(), CommandError> {
-        // TODO(conaticus): Check if a valid version is in the cache and is valid, if not install another version into the cache
         // In future we could automatically find a version that is valid for both limits to save storage, but that's not neccessary right now
         println!("Installing '{}'..", self.package_name);
 
         let client = reqwest::Client::new();
         let start = Instant::now();
 
+        let semantic_version_ref = self.semantic_version.as_ref();
+
+        let full_version = Versions::resolve_full_version(semantic_version_ref);
+        let is_cached = Cache::exists(
+            &self.package_name,
+            full_version.as_ref(),
+            semantic_version_ref,
+        )
+        .await?;
+
+        if is_cached {
+            // TODO(conaticus): Handle if in the cache.
+            return Ok(());
+        }
+
         let version_data = Self::get_version_data(
             client.clone(),
             &self.package_name,
+            full_version,
             self.semantic_version.as_ref(),
         )
         .await?;
@@ -207,10 +267,17 @@ impl CommandHandler for Installer {
 
         let installed_dependencies_mux: InstalledVersionsMutex =
             Arc::new(Mutex::new(HashMap::new()));
-        Self::install_package(client, version_data, tx, installed_dependencies_mux)?;
+        Self::install_package(
+            client,
+            version_data,
+            tx,
+            Arc::clone(&installed_dependencies_mux),
+        )?;
 
         // NOTE(conaticus): This is blocking however it's not going to have a huge performance impact on tokio
         while load_task_count() != 0 {}
+
+        let installed_dependencies = installed_dependencies_mux.lock().unwrap();
 
         println!("elapsed: {}ms", start.elapsed().as_millis());
 

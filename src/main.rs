@@ -1,3 +1,4 @@
+mod cache;
 mod command_handler;
 mod errors;
 mod http;
