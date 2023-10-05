@@ -15,6 +15,8 @@ pub const EMPTY_VERSION: Version = Version {
     build: BuildMetadata::EMPTY,
 };
 
+pub const LATEST: &str = "latest";
+
 type PackageDetails = (String, Option<Comparator>);
 
 pub struct Versions;
@@ -29,7 +31,7 @@ impl Versions {
 
         match split.next() {
             Some(version_raw) => (name, version_raw.to_string()),
-            None => (name, String::from("latest")),
+            None => (name, LATEST.to_string()),
         }
     }
 
@@ -42,7 +44,7 @@ impl Versions {
     pub fn parse_semantic_package_details(details: String) -> Result<PackageDetails, ParseError> {
         let (name, version_raw) = Self::parse_raw_package_details(details);
 
-        if version_raw == "latest" {
+        if version_raw == LATEST {
             return Ok((name, None));
         }
 
@@ -55,7 +57,7 @@ impl Versions {
     /// If the version is not resolvable without requesting the full package data, None will be returned.
     /// None will also be returned if the version operator is Op::Less (<?.?.?) because we need all versions to get the latest version less than this
     pub fn resolve_full_version(semantic_version: Option<&Comparator>) -> Option<String> {
-        let latest = String::from("latest");
+        let latest = LATEST.to_string();
 
         let semantic_version = match semantic_version {
             Some(semantic_version) => semantic_version,
@@ -124,6 +126,14 @@ impl Versions {
 
     pub fn stringify(name: &String, version: &String) -> String {
         format!("{}@{}", name, version)
+    }
+
+    /// Takes in a result of Versions::resolve_full_version()
+    pub fn is_latest(version_string: Option<String>) -> bool {
+        match version_string {
+            Some(version) => version == LATEST,
+            None => false,
+        }
     }
 
     // NOTE(conaticus): This might not be effective for versions that include a prerelease in the version (experimental, canary etc)

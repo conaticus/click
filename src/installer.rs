@@ -3,6 +3,8 @@ use bytes::Bytes;
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use semver::Comparator;
+use std::fs::File;
+use std::io::Write;
 use std::{
     collections::HashMap,
     env::Args,
@@ -14,7 +16,6 @@ use std::{
     time::Instant,
 };
 use tar::Archive;
-use tokio::fs;
 
 use crate::{
     cache::{Cache, CACHE_DIRECTORY},
@@ -24,8 +25,8 @@ use crate::{
         ParseError::{self, *},
     },
     http::HTTPRequest,
-    types::VersionData,
-    versions::Versions,
+    types::{DependencyMap, PackageLock, VersionData},
+    versions::{Versions, LATEST},
 };
 
 #[derive(Default)]
@@ -50,14 +51,14 @@ fn load_task_count() -> usize {
 
 type PackageBytes = (String, Bytes); // Package destination, package bytes
 
-type InstalledVersionsMutex = Arc<Mutex<HashMap<String, Vec<String>>>>;
+type DependencyMapMutex = Arc<Mutex<DependencyMap>>;
 
 impl Installer {
     /// Gets the version data taking in the full version rather than resolving it on its own.
     async fn get_version_data(
         client: Client,
         package_name: &String,
-        full_version: Option<String>,
+        full_version: Option<&String>,
         semantic_version: Option<&Comparator>,
     ) -> Result<VersionData, CommandError> {
         if let Some(version) = full_version {
@@ -81,17 +82,18 @@ impl Installer {
     fn already_resolved(
         name: &String,
         version: &String,
-        installed_dependencies_mux: InstalledVersionsMutex,
+        is_latest: bool,
+        dependency_map_mux: DependencyMapMutex,
     ) -> bool {
-        let mut installed_dependencies = installed_dependencies_mux.lock().unwrap();
+        let mut dependency_map = dependency_map_mux.lock().unwrap();
         let stringified_version = Versions::stringify(name, version);
 
-        let installed_version = installed_dependencies.get(&stringified_version);
+        let installed_version = dependency_map.get(&stringified_version);
 
         match installed_version {
             Some(_) => true,
             None => {
-                installed_dependencies.insert(stringified_version, Vec::new());
+                dependency_map.insert(stringified_version, PackageLock::new(is_latest));
                 false
             }
         }
@@ -101,14 +103,14 @@ impl Installer {
     fn append_version(
         parent_version_name: String,
         new_version_name: String,
-        installed_dependencies_mux: InstalledVersionsMutex,
+        dependency_map_mux: DependencyMapMutex,
     ) -> Result<(), CommandError> {
-        let mut installed_dependencies = installed_dependencies_mux.lock().unwrap();
-        let parent_version = installed_dependencies
-            .entry(parent_version_name)
-            .or_insert(Vec::new());
+        let mut dependency_map = dependency_map_mux.lock().unwrap();
+        let parent_version = dependency_map
+            .entry(parent_version_name.to_string())
+            .or_insert(PackageLock::new(parent_version_name.ends_with(LATEST)));
 
-        parent_version.push(new_version_name);
+        parent_version.dependencies.push(new_version_name);
 
         Ok(())
     }
@@ -116,13 +118,15 @@ impl Installer {
     fn install_package(
         client: reqwest::Client,
         version_data: VersionData,
+        is_latest: bool,
         bytes_sender: Sender<PackageBytes>,
-        installed_dependencies_mux: InstalledVersionsMutex,
+        dependency_map_mux: DependencyMapMutex,
     ) -> Result<(), CommandError> {
         if Self::already_resolved(
             &version_data.name,
             &version_data.version,
-            Arc::clone(&installed_dependencies_mux),
+            is_latest,
+            Arc::clone(&dependency_map_mux),
         ) {
             return Ok(());
         }
@@ -156,7 +160,9 @@ impl Installer {
                 let comparator_ref = Some(&comparator);
 
                 let full_version = Versions::resolve_full_version(comparator_ref);
-                let is_cached = Cache::exists(&name, full_version.as_ref(), comparator_ref)
+                let full_version_ref = full_version.as_ref();
+
+                let is_cached = Cache::exists(&name, full_version_ref, comparator_ref)
                     .await
                     .unwrap();
 
@@ -166,7 +172,7 @@ impl Installer {
                 }
 
                 let version_data =
-                    Self::get_version_data(client.clone(), &name, full_version, comparator_ref)
+                    Self::get_version_data(client.clone(), &name, full_version_ref, comparator_ref)
                         .await
                         .unwrap();
 
@@ -176,15 +182,16 @@ impl Installer {
                 Self::append_version(
                     stringified_parent.clone(),
                     stringified_child,
-                    Arc::clone(&installed_dependencies_mux),
+                    Arc::clone(&dependency_map_mux),
                 )
                 .unwrap();
 
                 Self::install_package(
                     client.clone(),
                     version_data,
+                    Versions::is_latest(full_version),
                     bytes_sender.clone(),
-                    Arc::clone(&installed_dependencies_mux),
+                    Arc::clone(&dependency_map_mux),
                 )
                 .unwrap();
             }
@@ -233,12 +240,10 @@ impl CommandHandler for Installer {
         let semantic_version_ref = self.semantic_version.as_ref();
 
         let full_version = Versions::resolve_full_version(semantic_version_ref);
-        let is_cached = Cache::exists(
-            &self.package_name,
-            full_version.as_ref(),
-            semantic_version_ref,
-        )
-        .await?;
+        let full_version_ref = full_version.as_ref();
+
+        let is_cached =
+            Cache::exists(&self.package_name, full_version_ref, semantic_version_ref).await?;
 
         if is_cached {
             // TODO(conaticus): Handle if in the cache.
@@ -248,7 +253,7 @@ impl CommandHandler for Installer {
         let version_data = Self::get_version_data(
             client.clone(),
             &self.package_name,
-            full_version,
+            full_version_ref,
             self.semantic_version.as_ref(),
         )
         .await?;
@@ -265,19 +270,34 @@ impl CommandHandler for Installer {
             decrement_task_count();
         });
 
-        let installed_dependencies_mux: InstalledVersionsMutex =
-            Arc::new(Mutex::new(HashMap::new()));
+        let dependency_map_mux: DependencyMapMutex = Arc::new(Mutex::new(HashMap::new()));
+
         Self::install_package(
             client,
             version_data,
+            Versions::is_latest(full_version),
             tx,
-            Arc::clone(&installed_dependencies_mux),
+            Arc::clone(&dependency_map_mux),
         )?;
 
         // NOTE(conaticus): This is blocking however it's not going to have a huge performance impact on tokio
         while load_task_count() != 0 {}
 
-        let installed_dependencies = installed_dependencies_mux.lock().unwrap();
+        let dependency_map = dependency_map_mux.lock().unwrap();
+        for (package_name, package_lock) in dependency_map.iter() {
+            let mut package_lock_file = File::create(format!(
+                "{}/{}/package/click-lock.json",
+                *CACHE_DIRECTORY, package_name
+            ))
+            .map_err(CommandError::FailedToCreateFile)?;
+
+            let package_lock_string = serde_json::to_string(package_lock)
+                .map_err(CommandError::FailedToSerializePackageLock)?;
+
+            package_lock_file
+                .write_all(package_lock_string.as_bytes())
+                .map_err(CommandError::FailedToWriteFile)?;
+        }
 
         println!("elapsed: {}ms", start.elapsed().as_millis());
 
