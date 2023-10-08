@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
     fs::{self as fs_sync, File},
-    io::{Read, Seek, SeekFrom},
+    io::{ErrorKind, Read, Seek, SeekFrom},
+    path::Path,
     str::FromStr,
 };
 
@@ -11,6 +12,7 @@ use tokio::fs;
 
 use crate::{
     errors::CommandError,
+    types::PackageLock,
     versions::{Versions, EMPTY_VERSION, LATEST},
 };
 
@@ -87,9 +89,8 @@ impl Cache {
 
             let stringified_version = Versions::stringify(package_name, version);
             return Ok((
-                fs::metadata(format!("{}/{}", *CACHE_DIRECTORY, stringified_version))
-                    .await
-                    .is_ok(),
+                Path::new(format!("{}/{}", *CACHE_DIRECTORY, stringified_version).as_str())
+                    .exists(),
                 Some(version.to_string()),
             ));
         }
@@ -131,5 +132,30 @@ impl Cache {
     }
 
     /// Package string is formated as package@version
-    pub fn load_cached_version(package: String) {}
+    pub fn load_cached_version(package: String) {
+        let lockfile_raw = fs_sync::read_to_string(format!(
+            "{}/{}/package/click-lock.json",
+            *CACHE_DIRECTORY, package
+        ))
+        .expect("Failed to read package lockfile");
+
+        let lockfile = serde_json::from_str::<PackageLock>(lockfile_raw.as_str()).unwrap();
+        let mut dependencies = lockfile.dependencies;
+        dependencies.push(package);
+
+        for dependency in dependencies {
+            let (package_name, _) = Versions::parse_raw_package_details(dependency.to_string());
+
+            let result = symlink::symlink_dir(
+                format!("{}/{}/package", *CACHE_DIRECTORY, dependency),
+                format!("./node_modules/{}", package_name),
+            );
+
+            match result {
+                Ok(_) => continue,
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+                Err(err) => panic!("{}", err),
+            }
+        }
+    }
 }

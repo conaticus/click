@@ -75,12 +75,11 @@ impl CommandHandler for InstallHandler {
         let (is_cached, cached_version) =
             Cache::exists(&self.package_name, full_version, semantic_version).await?;
 
-        if is_cached {
-            let version = full_version
-                .or(cached_version.as_ref())
-                .expect("Could not resolve version of cached package");
+        Installer::create_modules_dir();
 
-            Cache::load_cached_version(Versions::stringify(&self.package_name, version));
+        if is_cached {
+            let version = cached_version.expect("Could not resolve version of cached package");
+            Cache::load_cached_version(Versions::stringify(&self.package_name, &version));
 
             return Ok(());
         }
@@ -114,14 +113,21 @@ impl CommandHandler for InstallHandler {
         let package_info = PackageInfo {
             version_data,
             is_latest: Versions::is_latest(full_version),
-            stringified,
+            stringified: stringified.to_string(),
         };
 
-        Installer::install_package(install_context, package_info)?;
+        Installer::install_package(
+            install_context,
+            package_info,
+            Arc::new(Mutex::new(Vec::new())),
+        )?;
 
         // Blocks the main thread however it's not going to have a huge performance impact on tokio
         TaskAllocator::block_until_done();
 
-        Self::write_lockfiles(dependency_map_mux)
+        Self::write_lockfiles(dependency_map_mux)?;
+        Cache::load_cached_version(stringified);
+
+        Ok(())
     }
 }

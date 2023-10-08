@@ -82,16 +82,22 @@ impl Installer {
 
     /// Append a version to a specific parent version, this hashmap will be used to generate package lock files.
     fn append_version(
-        parent_version_name: &String,
+        parents_mux: Arc<Mutex<Vec<String>>>,
         new_version_name: String,
         dependency_map_mux: DependencyMapMutex,
     ) -> Result<(), CommandError> {
         let mut dependency_map = dependency_map_mux.lock().unwrap();
-        let parent_version = dependency_map
-            .entry(parent_version_name.to_string())
-            .or_insert(PackageLock::new(parent_version_name.ends_with(LATEST)));
+        let parents = parents_mux.lock().unwrap();
 
-        parent_version.dependencies.push(new_version_name);
+        for parent_version_name in parents.iter() {
+            let parent_version = dependency_map
+                .entry(parent_version_name.to_string())
+                .or_insert(PackageLock::new(parent_version_name.ends_with(LATEST)));
+
+            parent_version
+                .dependencies
+                .push(new_version_name.to_string());
+        }
 
         Ok(())
     }
@@ -99,9 +105,22 @@ impl Installer {
     pub fn install_package(
         context: InstallContext,
         package_info: PackageInfo,
+        parents_mux: Arc<Mutex<Vec<String>>>,
     ) -> Result<(), CommandError> {
         if Self::already_resolved(&context, &package_info) {
             return Ok(());
+        }
+
+        Self::append_version(
+            Arc::clone(&parents_mux),
+            package_info.stringified.to_string(),
+            Arc::clone(&context.dependency_map_mux),
+        )
+        .unwrap();
+
+        {
+            let mut parents = parents_mux.lock().unwrap();
+            parents.push(package_info.stringified.to_string());
         }
 
         TaskAllocator::add_task(async move {
@@ -121,59 +140,47 @@ impl Installer {
                 .unwrap();
 
             let dependencies = version_data.dependencies.unwrap_or(HashMap::new());
-            Self::install_dependencies(&package_info.stringified, context, dependencies).await;
+            Self::install_dependencies(parents_mux, context, dependencies).await;
         });
 
         Ok(())
     }
 
     async fn install_dependencies(
-        parent: &String,
+        parents_mux: Arc<Mutex<Vec<String>>>,
         context: InstallContext,
         dependencies: HashMap<String, String>,
     ) {
         for (name, version) in dependencies {
             let comparator = Versions::parse_semantic_version(&version)
                 .expect("Failed to parse semantic version"); // TODO(conaticus): Change this to return a result
+            let comparator = Some(&comparator);
 
-            let comparator_ref = Some(&comparator);
+            let full_version = Versions::resolve_full_version(comparator);
+            let full_version = full_version.as_ref();
 
-            let full_version = Versions::resolve_full_version(comparator_ref);
-            let full_version_ref = full_version.as_ref();
+            let (is_cached, cached_version) = Cache::exists(&name, full_version, comparator)
+                .await
+                .unwrap();
 
-            let (is_cached, cached_version) =
-                Cache::exists(&name, full_version_ref, comparator_ref)
+            if is_cached {
+                let version = cached_version.expect("Could not resolve version of cached package");
+                let stringified = Versions::stringify(&name, &version);
+
+                // We need to do this check as the pre-cached version may have just been installed (and therefore have no lockfile which is mandatory)
+                let dependency_map = context.dependency_map_mux.lock().unwrap();
+                if dependency_map.get(stringified.as_str()).is_none() {
+                    Cache::load_cached_version(stringified);
+                    continue;
+                }
+            }
+
+            let version_data =
+                Self::get_version_data(context.client.clone(), &name, full_version, comparator)
                     .await
                     .unwrap();
 
-            if is_cached {
-                let version = full_version
-                    .or(cached_version)
-                    .expect("Could not resolve version of cached package");
-
-                let stringified = Versions::stringify(&name, &version);
-                Cache::load_cached_version(stringified);
-
-                continue;
-            }
-
-            let version_data = Self::get_version_data(
-                context.client.clone(),
-                &name,
-                full_version_ref,
-                comparator_ref,
-            )
-            .await
-            .unwrap();
-
             let stringified = Versions::stringify(&name, &version_data.version);
-
-            Self::append_version(
-                parent,
-                stringified.to_string(),
-                Arc::clone(&context.dependency_map_mux),
-            )
-            .unwrap();
 
             let package_info = PackageInfo {
                 version_data,
@@ -181,12 +188,12 @@ impl Installer {
                 stringified,
             };
 
-            Self::install_package(context.clone(), package_info).unwrap();
+            Self::install_package(context.clone(), package_info, Arc::clone(&parents_mux)).unwrap();
         }
     }
 
     /// Creates the node modules folder if it is not present.
-    fn create_modules_dir() {
+    pub fn create_modules_dir() {
         if Path::new("./node_modules").exists() {
             return;
         }
