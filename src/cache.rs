@@ -14,6 +14,13 @@ use crate::{
     versions::{Versions, EMPTY_VERSION, LATEST},
 };
 
+pub struct CachedVersion {
+    pub version: String,
+    pub is_latest: bool,
+}
+
+pub type CachedVersions = HashMap<String, CachedVersion>;
+
 lazy_static! {
     pub static ref CACHE_DIRECTORY: String = format!(
         "{}/node-cache",
@@ -22,13 +29,14 @@ lazy_static! {
             .to_str()
             .expect("Failed to convert cache directory to string")
     );
-    pub static ref CACHED_VERSIONS: HashMap<String, bool> = Cache::get_cached_versions();
+    pub static ref CACHED_VERSIONS: CachedVersions = Cache::get_cached_versions();
 }
 
 pub struct Cache;
 impl Cache {
-    /// Returns a hashmap, each key is formatted as package@version and the value is whether the package is the latest version or not
-    pub fn get_cached_versions() -> HashMap<String, bool> {
+    /// Returns a hashmap, each key is formatted as package@version
+    /// and the value is a boolean of whether the package is the latest version or not.
+    pub fn get_cached_versions() -> CachedVersions {
         let dir_contents =
             fs_sync::read_dir(CACHE_DIRECTORY.to_string()).expect("Failed to read cache directory");
 
@@ -44,6 +52,7 @@ impl Cache {
             ))
             .expect("Failed to read package lock file");
 
+            // This is not an ideal method but it beats parsing the JSON of every installed package
             let start_byte = 12;
             let end_byte = 15;
 
@@ -56,30 +65,33 @@ impl Cache {
             let is_latest_str = String::from_utf8(buf).unwrap();
             let is_latest = is_latest_str == "true";
 
-            cached_versions.insert(filename, is_latest);
+            let (name, version) = Versions::parse_raw_package_details(filename);
+            cached_versions.insert(name, CachedVersion { version, is_latest });
         }
 
         return cached_versions;
     }
 
     /// Checks if a package with a valid version matching with `semantic_version` is already in the cache
-    /// and returns `true` if so, `false` if otherwise.
+    /// and returns `true` if so, `false` if otherwise, as well as the resolved version if it exists
     pub async fn exists(
         package_name: &String,
         version: Option<&String>,
         semantic_version: Option<&Comparator>,
-    ) -> Result<bool, CommandError> {
+    ) -> Result<(bool, Option<String>), CommandError> {
         if let Some(version) = version {
             if version == LATEST {
-                return Ok(Self::latest_is_cached(package_name));
+                let latest_version = Self::get_latest_version_in_cache(package_name);
+                return Ok((latest_version.is_some(), latest_version));
             }
 
             let stringified_version = Versions::stringify(&package_name, &version);
-            return Ok(
+            return Ok((
                 fs::metadata(format!("{}/{}", *CACHE_DIRECTORY, stringified_version))
                     .await
                     .is_ok(),
-            );
+                Some(version.to_string()),
+            ));
         }
 
         let mut cache_entries = fs::read_dir(CACHE_DIRECTORY.to_string())
@@ -103,19 +115,23 @@ impl Cache {
 
             let version = &Version::from_str(entry_version.as_str()).unwrap_or(EMPTY_VERSION);
             if semantic_version.matches(version) {
-                return Ok(true);
+                return Ok((true, Some(entry_version)));
             }
         }
 
-        Ok(false)
+        Ok((false, None))
     }
 
     /// Checks if the latest version exists in the cache.
     /// This is checked by reading if the package lock has the latest property as true.
-    pub fn latest_is_cached(package_name: &String) -> bool {
-        match CACHED_VERSIONS.get(package_name) {
-            Some(is_latest) => *is_latest,
-            None => false,
+    pub fn get_latest_version_in_cache(package_name: &String) -> Option<String> {
+        if let Some(cached_version) = CACHED_VERSIONS.get(package_name) {
+            Some(cached_version.version.to_string())
+        } else {
+            None
         }
     }
+
+    /// Package string is formated as package@version
+    pub fn load_cached_version(package: String) {}
 }

@@ -129,14 +129,14 @@ impl Versions {
     }
 
     /// Takes in a result of Versions::resolve_full_version()
-    pub fn is_latest(version_string: Option<String>) -> bool {
+    pub fn is_latest(version_string: Option<&String>) -> bool {
         match version_string {
             Some(version) => version == LATEST,
             None => false,
         }
     }
 
-    // NOTE(conaticus): This might not be effective for versions that include a prerelease in the version (experimental, canary etc)
+    // This might not be effective for versions that include a prerelease in the version (experimental, canary etc)
     fn sort(versions_vec: &mut [(&String, &VersionData)]) {
         versions_vec.sort_by(|a, b| a.0.cmp(b.0))
     }

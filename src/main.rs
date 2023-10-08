@@ -1,12 +1,15 @@
 mod cache;
-mod command_handler;
+mod commands;
 mod errors;
 mod http;
 mod installer;
 mod types;
+mod util;
 mod versions;
 
 use std::env;
+
+use commands::command_handler;
 
 #[tokio::main]
 async fn main() {
