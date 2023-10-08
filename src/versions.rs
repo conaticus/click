@@ -35,7 +35,7 @@ impl Versions {
         }
     }
 
-    pub fn parse_semantic_version(raw_version: &String) -> Result<Comparator, ParseError> {
+    pub fn parse_semantic_version(raw_version: &str) -> Result<Comparator, ParseError> {
         let mut version =
             VersionReq::parse(raw_version).map_err(ParseError::InvalidVersionNotation)?;
         Ok(version.comparators.remove(0))

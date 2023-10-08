@@ -69,7 +69,7 @@ impl Cache {
             cached_versions.insert(name, CachedVersion { version, is_latest });
         }
 
-        return cached_versions;
+        cached_versions
     }
 
     /// Checks if a package with a valid version matching with `semantic_version` is already in the cache
@@ -85,7 +85,7 @@ impl Cache {
                 return Ok((latest_version.is_some(), latest_version));
             }
 
-            let stringified_version = Versions::stringify(&package_name, &version);
+            let stringified_version = Versions::stringify(package_name, version);
             return Ok((
                 fs::metadata(format!("{}/{}", *CACHE_DIRECTORY, stringified_version))
                     .await
@@ -125,11 +125,9 @@ impl Cache {
     /// Checks if the latest version exists in the cache.
     /// This is checked by reading if the package lock has the latest property as true.
     pub fn get_latest_version_in_cache(package_name: &String) -> Option<String> {
-        if let Some(cached_version) = CACHED_VERSIONS.get(package_name) {
-            Some(cached_version.version.to_string())
-        } else {
-            None
-        }
+        CACHED_VERSIONS
+            .get(package_name)
+            .map(|cached_version| cached_version.version.to_string())
     }
 
     /// Package string is formated as package@version

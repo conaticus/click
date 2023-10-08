@@ -1,9 +1,6 @@
 use std::{
     future::Future,
-    sync::{
-        atomic::{self, AtomicUsize},
-        Arc,
-    },
+    sync::atomic::{self, AtomicUsize},
     thread::{self},
     time::Duration,
 };

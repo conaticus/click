@@ -1,30 +1,16 @@
-use async_trait::async_trait;
 use bytes::Bytes;
-use flate2::read::GzDecoder;
 use semver::Comparator;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs::{self};
 use std::path::Path;
 use std::{
     collections::HashMap,
-    env::Args,
-    sync::{
-        atomic::{self, AtomicUsize},
-        mpsc::{channel, Sender},
-        Arc, Mutex,
-    },
-    time::Instant,
+    sync::{mpsc::Sender, Arc, Mutex},
 };
-use tar::Archive;
 
 use crate::util::TaskAllocator;
 use crate::{
     cache::{Cache, CACHE_DIRECTORY},
-    command_handler::CommandHandler,
-    errors::{
-        CommandError::{self},
-        ParseError::{self, *},
-    },
+    errors::CommandError::{self},
     http::HTTPRequest,
     types::{DependencyMap, PackageLock, VersionData},
     versions::{Versions, LATEST},
@@ -56,7 +42,7 @@ impl Installer {
         semantic_version: Option<&Comparator>,
     ) -> Result<VersionData, CommandError> {
         if let Some(version) = full_version {
-            return HTTPRequest::version_data(client.clone(), package_name, &version).await;
+            return HTTPRequest::version_data(client.clone(), package_name, version).await;
         }
 
         let mut package_data = HTTPRequest::package_data(client.clone(), package_name).await?;

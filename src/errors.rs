@@ -25,8 +25,6 @@ pub enum CommandError {
     InvalidVersion,
     #[error("failed to extract tar file ({0})")]
     ExtractionFailed(Error),
-    #[error("could not find version in lock hashmap")]
-    DependencyNotFoundInHashMap,
     #[error("could not find cache directory ({0})")]
     NoCacheDirectory(Error),
     #[error("failed to get directory entry ({0})")]
