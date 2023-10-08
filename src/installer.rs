@@ -111,7 +111,6 @@ impl Installer {
     }
 
     pub fn install_package(
-        task_allocator: &TaskAllocator,
         context: InstallContext,
         package_info: PackageInfo,
     ) -> Result<(), CommandError> {
@@ -119,7 +118,7 @@ impl Installer {
             return Ok(());
         }
 
-        task_allocator.add_task(async move {
+        TaskAllocator::add_task(async move {
             let version_data = package_info.version_data;
 
             let package_bytes =
@@ -136,14 +135,14 @@ impl Installer {
                 .unwrap();
 
             let dependencies = version_data.dependencies.unwrap_or(HashMap::new());
-            Self::install_dependencies(package_info.stringified, context, dependencies);
+            Self::install_dependencies(&package_info.stringified, context, dependencies).await;
         });
 
         Ok(())
     }
 
     async fn install_dependencies(
-        parent: String,
+        parent: &String,
         context: InstallContext,
         dependencies: HashMap<String, String>,
     ) {
@@ -156,14 +155,19 @@ impl Installer {
             let full_version = Versions::resolve_full_version(comparator_ref);
             let full_version_ref = full_version.as_ref();
 
-            let (is_cached, _) = Cache::exists(&name, full_version_ref, comparator_ref)
-                .await
-                .unwrap();
-
-            let stringified = Versions::stringify(&name, &version);
+            let (is_cached, cached_version) =
+                Cache::exists(&name, full_version_ref, comparator_ref)
+                    .await
+                    .unwrap();
 
             if is_cached {
+                let version = full_version
+                    .or(cached_version)
+                    .expect("Could not resolve version of cached package");
+
+                let stringified = Versions::stringify(&name, &version);
                 Cache::load_cached_version(stringified);
+
                 continue;
             }
 
@@ -176,8 +180,10 @@ impl Installer {
             .await
             .unwrap();
 
+            let stringified = Versions::stringify(&name, &version_data.version);
+
             Self::append_version(
-                &parent,
+                parent,
                 stringified.to_string(),
                 Arc::clone(&context.dependency_map_mux),
             )
@@ -189,12 +195,7 @@ impl Installer {
                 stringified,
             };
 
-            let dependencies = package_info
-                .version_data
-                .dependencies
-                .unwrap_or(HashMap::new());
-
-            Self::install_dependencies(version, context.clone(), dependencies);
+            Self::install_package(context.clone(), package_info).unwrap();
         }
     }
 

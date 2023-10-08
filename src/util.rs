@@ -27,55 +27,54 @@ pub fn extract_tarball(bytes: Bytes, dest: String) -> Result<(), CommandError> {
         .map_err(CommandError::ExtractionFailed)
 }
 
-#[derive(Default)]
-pub struct TaskAllocator {
-    active_tasks: Arc<AtomicUsize>,
-}
+pub static ACTIVE_TASKS: AtomicUsize = AtomicUsize::new(0);
+
+pub struct TaskAllocator;
 
 impl TaskAllocator {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add_task<T>(&self, future: T) -> JoinHandle<T::Output>
+    pub fn add_task<T>(future: T) -> JoinHandle<T::Output>
     where
         T: Future + Send + 'static,
         T::Output: Send + 'static,
     {
-        let active_tasks = Arc::clone(&self.active_tasks);
-
         tokio::spawn(async move {
-            active_tasks.fetch_add(1, SeqCst);
+            Self::increment_tasks();
             let future_result = future.await;
-            active_tasks.fetch_sub(1, SeqCst);
+            Self::decrement_tasks();
 
             future_result
         })
     }
 
-    pub fn add_blocking<F, R>(&self, f: F) -> JoinHandle<R>
+    pub fn add_blocking<F, R>(f: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let active_tasks = Arc::clone(&self.active_tasks);
-
         tokio::task::spawn_blocking(move || {
-            active_tasks.fetch_add(1, SeqCst);
+            Self::increment_tasks();
             let task_result = f();
-            active_tasks.fetch_sub(1, SeqCst);
+            Self::decrement_tasks();
 
             task_result
         })
     }
 
-    pub fn block_until_done(&self) {
-        while self.task_count() != 0 {
+    pub fn block_until_done() {
+        while Self::task_count() != 0 {
             thread::sleep(Duration::from_millis(1));
         }
     }
 
-    fn task_count(&self) -> usize {
-        self.active_tasks.load(SeqCst)
+    fn increment_tasks() {
+        ACTIVE_TASKS.fetch_add(1, SeqCst);
+    }
+
+    fn decrement_tasks() {
+        ACTIVE_TASKS.fetch_sub(1, SeqCst);
+    }
+
+    fn task_count() -> usize {
+        ACTIVE_TASKS.load(SeqCst)
     }
 }

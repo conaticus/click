@@ -93,10 +93,9 @@ impl CommandHandler for InstallHandler {
         )
         .await?;
 
-        let task_allocator = TaskAllocator::new();
         let (bytes_sender, bytes_receiver) = channel::<PackageBytes>();
 
-        task_allocator.add_blocking(move || {
+        TaskAllocator::add_blocking(move || {
             while let Ok((package_dest, bytes)) = bytes_receiver.recv() {
                 util::extract_tarball(bytes, package_dest).unwrap();
             }
@@ -118,10 +117,10 @@ impl CommandHandler for InstallHandler {
             stringified,
         };
 
-        Installer::install_package(&task_allocator, install_context, package_info)?;
+        Installer::install_package(install_context, package_info)?;
 
         // Blocks the main thread however it's not going to have a huge performance impact on tokio
-        task_allocator.block_until_done();
+        TaskAllocator::block_until_done();
 
         Self::write_lockfiles(dependency_map_mux)
     }

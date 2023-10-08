@@ -141,7 +141,7 @@ impl Versions {
         versions_vec.sort_by(|a, b| a.0.cmp(b.0))
     }
 
-    fn stringify_from_numbers(major: u64, minor: u64, patch: u64) -> String {
+    pub fn stringify_from_numbers(major: u64, minor: u64, patch: u64) -> String {
         format!("{}.{}.{}", major, minor, patch)
     }
 }
