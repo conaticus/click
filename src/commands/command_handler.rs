@@ -1,13 +1,12 @@
 use async_trait::async_trait;
 use std::env::Args;
 
-use crate::{
-    errors::{
-        CommandError,
-        ParseError::{self, CommandNotFound},
-    },
-    installer::Installer,
+use crate::errors::{
+    CommandError,
+    ParseError::{self, CommandNotFound},
 };
+
+use super::install::InstallHandler;
 
 #[async_trait]
 pub trait CommandHandler {
@@ -28,7 +27,7 @@ pub async fn handle_args(mut args: Args) -> Result<(), ParseError> {
     };
 
     let mut command_handler: Box<dyn CommandHandler> = match command.to_lowercase().as_str() {
-        "install" => Box::<Installer>::default(),
+        "install" => Box::<InstallHandler>::default(),
         _ => return Err(CommandNotFound(command.to_string())),
     };
 

@@ -33,3 +33,5 @@ These are the primary functioning features required for this to pass as a "NodeJ
 - An `update` command
 - There is also an off case where some packages contain an operator at the end of their version like this `< version@2.2.3 > 1.1.2` which is not tolerated by [semver](https://docs.rs/semver/latest/semver/)
 - Use checksums to verify file downloads
+- Proper error handling everywhere
+- Checking in the cache if a version is not marked as latest when it should be - to save redownloading a package

@@ -7,7 +7,7 @@ use crate::{
     types::VersionData,
 };
 
-const EMPTY_VERSION: Version = Version {
+pub const EMPTY_VERSION: Version = Version {
     major: 0,
     minor: 0,
     patch: 0,
@@ -15,17 +15,13 @@ const EMPTY_VERSION: Version = Version {
     build: BuildMetadata::EMPTY,
 };
 
+pub const LATEST: &str = "latest";
+
 type PackageDetails = (String, Option<Comparator>);
 
 pub struct Versions;
 impl Versions {
-    pub fn parse_semantic_version(raw_version: &String) -> Result<Comparator, ParseError> {
-        let mut version =
-            VersionReq::parse(raw_version).map_err(ParseError::InvalidVersionNotation)?;
-        Ok(version.comparators.remove(0))
-    }
-
-    pub fn parse_package_details(details: String) -> Result<PackageDetails, ParseError> {
+    pub fn parse_raw_package_details(details: String) -> (String, String) {
         let mut split = details.split('@');
 
         let name = split
@@ -33,13 +29,26 @@ impl Versions {
             .expect("Provided package name is empty")
             .to_string();
 
-        let version_raw = match split.next() {
-            Some(version_raw) if version_raw == "latest" => return Ok((name, None)),
-            Some(version_raw) => version_raw,
-            None => return Ok((name, None)),
-        };
+        match split.next() {
+            Some(version_raw) => (name, version_raw.to_string()),
+            None => (name, LATEST.to_string()),
+        }
+    }
 
-        let comparator = Self::parse_semantic_version(&version_raw.to_string())?;
+    pub fn parse_semantic_version(raw_version: &str) -> Result<Comparator, ParseError> {
+        let mut version =
+            VersionReq::parse(raw_version).map_err(ParseError::InvalidVersionNotation)?;
+        Ok(version.comparators.remove(0))
+    }
+
+    pub fn parse_semantic_package_details(details: String) -> Result<PackageDetails, ParseError> {
+        let (name, version_raw) = Self::parse_raw_package_details(details);
+
+        if version_raw == LATEST {
+            return Ok((name, None));
+        }
+
+        let comparator = Self::parse_semantic_version(&version_raw)?;
         Ok((name, Some(comparator)))
     }
 
@@ -48,7 +57,7 @@ impl Versions {
     /// If the version is not resolvable without requesting the full package data, None will be returned.
     /// None will also be returned if the version operator is Op::Less (<?.?.?) because we need all versions to get the latest version less than this
     pub fn resolve_full_version(semantic_version: Option<&Comparator>) -> Option<String> {
-        let latest = String::from("latest");
+        let latest = LATEST.to_string();
 
         let semantic_version = match semantic_version {
             Some(semantic_version) => semantic_version,
@@ -62,9 +71,11 @@ impl Versions {
 
         match semantic_version.op {
             Op::Greater | Op::GreaterEq | Op::Wildcard => Some(latest),
-            Op::Exact | Op::LessEq | Op::Tilde | Op::Caret => {
-                Some(Self::to_string(semantic_version.major, minor, patch))
-            }
+            Op::Exact | Op::LessEq | Op::Tilde | Op::Caret => Some(Self::stringify_from_numbers(
+                semantic_version.major,
+                minor,
+                patch,
+            )),
             _ => None,
         }
     }
@@ -89,7 +100,7 @@ impl Versions {
                 let version_position = versions
                     .iter()
                     .position(|(ver, _)| {
-                        ver == &&Self::to_string(semantic_version.major, minor, patch)
+                        ver == &&Self::stringify_from_numbers(semantic_version.major, minor, patch)
                     })
                     .ok_or(CommandError::InvalidVersion)?;
 
@@ -113,12 +124,24 @@ impl Versions {
         Err(CommandError::InvalidVersion)
     }
 
-    // NOTE(conaticus): This might not be effective for versions that include a prerelease in the version (experimental, canary etc)
+    pub fn stringify(name: &String, version: &String) -> String {
+        format!("{}@{}", name, version)
+    }
+
+    /// Takes in a result of Versions::resolve_full_version()
+    pub fn is_latest(version_string: Option<&String>) -> bool {
+        match version_string {
+            Some(version) => version == LATEST,
+            None => false,
+        }
+    }
+
+    // This might not be effective for versions that include a prerelease in the version (experimental, canary etc)
     fn sort(versions_vec: &mut [(&String, &VersionData)]) {
         versions_vec.sort_by(|a, b| a.0.cmp(b.0))
     }
 
-    fn to_string(major: u64, minor: u64, patch: u64) -> String {
+    pub fn stringify_from_numbers(major: u64, minor: u64, patch: u64) -> String {
         format!("{}.{}.{}", major, minor, patch)
     }
 }
