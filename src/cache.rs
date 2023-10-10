@@ -126,9 +126,11 @@ impl Cache {
     /// Checks if the latest version exists in the cache.
     /// This is checked by reading if the package lock has the latest property as true.
     pub fn get_latest_version_in_cache(package_name: &String) -> Option<String> {
-        CACHED_VERSIONS
-            .get(package_name)
-            .map(|cached_version| cached_version.version.to_string())
+        let cached_version = CACHED_VERSIONS.get(package_name);
+        match cached_version {
+            Some(ver) if ver.is_latest => Some(ver.version.to_string()),
+            Some(_) | None => None,
+        }
     }
 
     /// Package string is formated as package@version
