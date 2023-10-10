@@ -87,10 +87,8 @@ impl Cache {
                 return Ok((latest_version.is_some(), latest_version));
             }
 
-            let stringified_version = Versions::stringify(package_name, version);
             return Ok((
-                Path::new(format!("{}/{}", *CACHE_DIRECTORY, stringified_version).as_str())
-                    .exists(),
+                Self::is_in_cache(package_name, version),
                 Some(version.to_string()),
             ));
         }
@@ -123,13 +121,21 @@ impl Cache {
         Ok((false, None))
     }
 
+    pub fn is_in_cache(package: &String, version: &String) -> bool {
+        let cached_version = CACHED_VERSIONS.get(package);
+        match cached_version {
+            Some(ver) if &ver.version == version => true,
+            _ => false,
+        }
+    }
+
     /// Checks if the latest version exists in the cache.
     /// This is checked by reading if the package lock has the latest property as true.
     pub fn get_latest_version_in_cache(package_name: &String) -> Option<String> {
         let cached_version = CACHED_VERSIONS.get(package_name);
         match cached_version {
             Some(ver) if ver.is_latest => Some(ver.version.to_string()),
-            Some(_) | None => None,
+            _ => None,
         }
     }
 
