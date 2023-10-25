@@ -9,7 +9,7 @@ Make sure you have Rust installed first!
 - Run `cargo run --release install package` or `cargo run --release install package@version`
 
 **IMPORTANT ⚠️**
-In order for the symlinks to work you need to use the `--preserve-symlinks` flag when running `node myfile.js`. If development continues I'll make this easier so you don't have to do this extra step!
+In order for the symlinks to work you need to use the `--preserve-symlinks` flag when running `node myfile.js`. You can also use the command `click exec myfile.js`
 
 ## How fast?
 
