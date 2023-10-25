@@ -20,8 +20,7 @@ pub async fn handle_args(mut args: Args) -> Result<(), ParseError> {
     let command = match args.next() {
         Some(command) => command,
         None => {
-            // TODO(conaticus): Implement help menu
-            println!("No help menu implemented yet.");
+            println!("Use: click <command> [options]\n  click install <package_name> [semver]");
             return Ok(());
         }
     };
