@@ -35,4 +35,6 @@ pub enum CommandError {
     FailedToWriteFile(Error),
     #[error("failed to serialize package lock ({0})")]
     FailedToSerializePackageLock(serde_json::Error),
+    #[error("command failed ({0})")]
+    ComandFailedError(Error)
 }

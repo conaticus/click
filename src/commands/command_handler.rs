@@ -7,6 +7,7 @@ use crate::errors::{
 };
 
 use super::install::InstallHandler;
+use super::exec::RunFileHandler;
 
 #[async_trait]
 pub trait CommandHandler {
@@ -20,14 +21,14 @@ pub async fn handle_args(mut args: Args) -> Result<(), ParseError> {
     let command = match args.next() {
         Some(command) => command,
         None => {
-            // TODO(conaticus): Implement help menu
-            println!("No help menu implemented yet.");
+            println!("Use: click <command> [options]\n  click install <package_name> [semver]\n  click exec <file name>");
             return Ok(());
         }
     };
 
     let mut command_handler: Box<dyn CommandHandler> = match command.to_lowercase().as_str() {
         "install" => Box::<InstallHandler>::default(),
+        "exec" => Box::<RunFileHandler>::default(),
         _ => return Err(CommandNotFound(command.to_string())),
     };
 

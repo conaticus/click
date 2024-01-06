@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fs::{self as fs_sync, File},
     io::{ErrorKind, Read, Seek, SeekFrom},
-    path::Path,
     str::FromStr,
 };
 
